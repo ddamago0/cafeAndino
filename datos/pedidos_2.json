@@ -1,0 +1,2 @@
+{"pedido_id": 104, "fecha": "2026-11-07", "cliente": {"ciudad": "Bogotá"}, "items": [{"producto": "Capuchino", "cantidad": 3}]}
+{"pedido_id": 105, "fecha": "2026-11-07", "cliente": {"ciudad": "Cali"}, "items": [{"producto": "Croissant", "cantidad": 2}, {"producto": "Café americano", "cantidad": 1}]}

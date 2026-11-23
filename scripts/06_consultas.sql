@@ -1,10 +1,10 @@
--- Seleccion del contexto de trabajo
-USE ROLE ACCOUNTADMIN;
+-- Configuración del contexto
+USE ROLE SYSADMIN;
 USE WAREHOUSE CAFE_ANDINO_WH;
 USE DATABASE CAFE_ANDINO_DB;
 USE SCHEMA CAFE_ANDINO_ESQUEMA;
 
--- Consulta 1: Ventas netas por tienda fisica ordenadas de mayor a menor
+-- Ventas netas por tienda física
 SELECT
     TIENDA,
     SUM(CANTIDAD * PRECIO_UNIT) AS VENTA_NETA
@@ -12,7 +12,7 @@ FROM VENTAS
 GROUP BY TIENDA
 ORDER BY VENTA_NETA DESC;
 
--- Consulta 2: Producto mas pedido online por cada ciudad
+-- Producto líder online por ciudad
 WITH TOTALES_ONLINE AS (
     SELECT
         CIUDAD,

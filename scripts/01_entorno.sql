@@ -1,36 +1,45 @@
--- Configuracion del contexto inicial
-USE ROLE ACCOUNTADMIN;
+-- Configuración del entorno
+USE ROLE SYSADMIN;
 
--- Creacion del warehouse de tamano minimo con auto-suspension y auto-reanudacion
+-- Creación del warehouse
 CREATE WAREHOUSE IF NOT EXISTS CAFE_ANDINO_WH
     WITH WAREHOUSE_SIZE = 'XSMALL'
     AUTO_SUSPEND = 60
     AUTO_RESUME = TRUE
-    INITIALLY_SUSPENDED = TRUE
-    COMMENT = 'Warehouse para el proyecto Cafe Andino';
+    INITIALLY_SUSPENDED = TRUE;
 
--- Creacion de la base de datos
+-- Creación de la base de datos
 CREATE DATABASE IF NOT EXISTS CAFE_ANDINO_DB;
 
--- Creacion del esquema
+-- Creación del esquema
 CREATE SCHEMA IF NOT EXISTS CAFE_ANDINO_DB.CAFE_ANDINO_ESQUEMA;
 
--- Seleccion del contexto de trabajo
-USE ROLE ACCOUNTADMIN;
+-- Configuración del contexto
 USE WAREHOUSE CAFE_ANDINO_WH;
 USE DATABASE CAFE_ANDINO_DB;
 USE SCHEMA CAFE_ANDINO_ESQUEMA;
 
--- Creacion de rol de solo lectura como segunda fuente segura
+-- Creación del rol de lectura
+USE ROLE ACCOUNTADMIN;
+
 CREATE ROLE IF NOT EXISTS CAFE_LECTOR;
 
--- Asignacion de privilegios de uso al rol lector
+-- Asignación de privilegios de uso
 GRANT USAGE ON WAREHOUSE CAFE_ANDINO_WH TO ROLE CAFE_LECTOR;
 GRANT USAGE ON DATABASE CAFE_ANDINO_DB TO ROLE CAFE_LECTOR;
 GRANT USAGE ON SCHEMA CAFE_ANDINO_DB.CAFE_ANDINO_ESQUEMA TO ROLE CAFE_LECTOR;
 
--- Asignacion de privilegios de consulta exclusiva al rol lector
+-- Asignación de privilegios de consulta
 GRANT SELECT ON ALL TABLES IN SCHEMA CAFE_ANDINO_DB.CAFE_ANDINO_ESQUEMA TO ROLE CAFE_LECTOR;
 GRANT SELECT ON FUTURE TABLES IN SCHEMA CAFE_ANDINO_DB.CAFE_ANDINO_ESQUEMA TO ROLE CAFE_LECTOR;
 GRANT SELECT ON ALL VIEWS IN SCHEMA CAFE_ANDINO_DB.CAFE_ANDINO_ESQUEMA TO ROLE CAFE_LECTOR;
 GRANT SELECT ON FUTURE VIEWS IN SCHEMA CAFE_ANDINO_DB.CAFE_ANDINO_ESQUEMA TO ROLE CAFE_LECTOR;
+
+-- Asignación del rol a administradores
+GRANT ROLE CAFE_LECTOR TO ROLE SYSADMIN;
+
+-- Retorno al rol de trabajo
+USE ROLE SYSADMIN;
+
+-- Asignación opcional al usuario ejecutor
+-- GRANT ROLE CAFE_LECTOR TO USER <TU_USUARIO>;

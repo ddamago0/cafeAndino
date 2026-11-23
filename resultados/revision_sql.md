@@ -1,37 +1,55 @@
-# Revision tecnica de scripts SQL
+# Revisión técnica de scripts SQL
 
-## Resumen de la revision
-Revision realizada por el agente de Ingenieria SQL sobre los scripts generados para el proyecto Cafe Andino. Se evaluo la sintaxis, tipos de datos, control de errores, cumplimiento de buenas practicas y limites de complejidad tecnica.
+## Resumen de la revisión
+Informe elaborado por el agente de Ingeniería SQL tras la reestructuración completa del flujo de scripts (`01_entorno.sql` a `07_prueba_lector.sql`). Se verificó la consistencia de roles, orden de creación de objetos, gestión de errores, idempotencia y límites de estilo.
 
 ## Hallazgos por script
 
 ### 01_entorno.sql
-- Parametrizacion del warehouse: Se empleo tamano XSMALL con AUTO_SUSPEND = 60 y AUTO_RESUME = TRUE. Cumple con la minimizacion de costos de computo.
-- Jerarquia de objetos: Se configuran correctamente base de datos CAFE_ANDINO_DB y esquema CAFE_ANDINO_ESQUEMA.
-- Seguridad y acceso: Se incluye la creacion del rol CAFE_LECTOR con privilegios USAGE y SELECT (tanto para objetos actuales como futuros). Cumple con el principio de menor privilegio y doble proteccion de solo lectura.
+- Jerarquía y privilegios:
+  - El warehouse `CAFE_ANDINO_WH` (tamaño XSMALL, auto-suspend 60 s), la base de datos `CAFE_ANDINO_DB` y el esquema `CAFE_ANDINO_ESQUEMA` se crean con `USE ROLE SYSADMIN`.
+  - Se utiliza `USE ROLE ACCOUNTADMIN` exclusivamente para la creación del rol `CAFE_LECTOR`, la concesión de sus privilegios (`USAGE` y `SELECT`) y la asignación `GRANT ROLE CAFE_LECTOR TO ROLE SYSADMIN`.
+  - Se eliminaron cambios de rol duplicados y se finaliza retornando a `USE ROLE SYSADMIN`.
+  - Se incluye la línea comentada `-- GRANT ROLE CAFE_LECTOR TO USER <TU_USUARIO>;` para que el usuario asigne el rol lector a su usuario en Snowflake.
 
-### 02_ventas_csv.sql
-- Tipos de datos: Se definen tipos adecuados (INTEGER, DATE, VARCHAR, NUMBER) compatibles con el esquema de ventas fisicas.
-- Formato de archivo: CSV_FORMAT omite cabecera (SKIP_HEADER = 1), usa codificacion UTF-8 y maneja nulos adecuadamente.
-- Deteccion y gestion de errores:
-  - VALIDATION_MODE = RETURN_ERRORS identifica que en la fila 7 la columna cantidad contiene la cadena de texto 'dos', incompatible con INTEGER.
-  - La directiva ON_ERROR = CONTINUE permite que el proceso de ingesta no se interrumpa, logrando cargar las 9 filas validas y aislando la fila 7 para saneamiento.
-- Verificacion: Se incluye consulta a INFORMATION_SCHEMA.COPY_HISTORY para auditar filas leidas, cargadas y rechazadas.
+### 02_objetos.sql
+- Desacoplamiento y orden:
+  - Se separó la creación DDL de las sentencias de carga. Este script centraliza los formatos `CSV_FORMAT` y `JSON_FORMAT`, las tablas base `VENTAS` y `PEDIDOS_RAW`, y los tres stages internos (`VENTAS_STAGE`, `PEDIDOS_STAGE`, `PEDIDOS_PIPE_STAGE`).
+  - Permite que los stages existan antes de que el usuario proceda a subir los archivos físicos mediante Snowsight o SnowSQL.
+  - No contiene instrucciones textuales de PUT ni rutas locales, las cuales se trasladaron exclusivamente al README.
 
-### 03_pedidos_json.sql
-- Ingesta semiestructurada: La tabla PEDIDOS_RAW almacena el objeto completo en una columna de tipo VARIANT.
-- Trazabilidad: Se capturan exitosamente METADATA$FILENAME y CURRENT_TIMESTAMP() mediante una subconsulta SELECT dentro de COPY INTO.
-- Transformacion relacional: La vista PEDIDOS_DETALLE utiliza LATERAL FLATTEN sobre DATOS:items, desagregando cada producto en una fila individual tipificada (PEDIDO_ID, CIUDAD, PRODUCTO, CANTIDAD).
+### 03_ventas_csv.sql
+- Validación y aislamiento de errores:
+  - Ejecuta `LIST @VENTAS_STAGE;` para comprobar la presencia del archivo.
+  - La sentencia previa con `VALIDATION_MODE = RETURN_ERRORS` identifica el error en la columna `CANTIDAD` (valor 'dos').
+  - La carga real con `ON_ERROR = CONTINUE` inserta las 9 filas válidas en `VENTAS`.
+  - Se implementó la creación de la tabla `VENTAS_RECHAZADAS` mediante `CREATE TABLE IF NOT EXISTS VENTAS_RECHAZADAS AS SELECT * FROM TABLE(VALIDATE(VENTAS, JOB_ID => '_last'));`, permitiendo auditar la fila errónea sin interrumpir la operación.
+  - Incluye consultas de conteo, inspección de registros y auditoría mediante `INFORMATION_SCHEMA.COPY_HISTORY`.
 
-### 04_snowpipe.sql
-- Configuracion de ingesta continua: Al utilizarse un stage interno (PEDIDOS_PIPE_STAGE), no se cuenta con integracion por eventos en la nube; por tanto, AUTO_INGEST debe ser FALSE.
-- Mecanismo de sincronizacion: Se especifica la sentencia ALTER PIPE PEDIDOS_PIPE REFRESH para procesar pedidos_2.json.
-- Integridad: Se asegura que pedidos_1.json no se vuelva a cargar, manteniendo un total consolidado de 5 pedidos sin duplicaciones.
-- Monitoreo: Se incluyen sentencias para consultar SYSTEM$PIPE_STATUS y el historial de COPY_HISTORY.
+### 04_pedidos_json.sql
+- Carga semiestructurada y vista:
+  - Carga `pedidos_1.json` en `PEDIDOS_RAW` extrayendo el documento en una columna `VARIANT` junto con metadatos (`METADATA$FILENAME` y `CURRENT_TIMESTAMP()`).
+  - Crea la vista relacional `PEDIDOS_DETALLE` usando `LATERAL FLATTEN(input => DATOS:items)`, aplanando los artículos sin alterar la tabla en bruto.
+  - Verifica que la tabla contenga 3 registros y la vista 5 filas.
 
-### 05_consultas.sql
-- Consulta 1 (Ventas netas por tienda): Calcula correctamente SUM(CANTIDAD * PRECIO_UNIT) agrupando por TIENDA y ordenando de forma descendente. Opera unicamente sobre las filas validas que fueron aceptadas en la tabla VENTAS.
-- Consulta 2 (Producto mas pedido online por ciudad): Aplica una expresion de tabla comun (WITH) con la funcion de ventana ROW_NUMBER() particionada por CIUDAD y ordenada por suma de cantidad descendente, filtrando el primer lugar (POSICION = 1).
+### 05_snowpipe.sql
+- Idempotencia y canalización continua:
+  - Se cambió `CREATE OR REPLACE PIPE` por `CREATE PIPE IF NOT EXISTS PEDIDOS_PIPE`, asegurando que ejecuciones posteriores del script no redefinan el pipe, no pierdan el historial de carga y no generen pedidos duplicados.
+  - Mantiene `AUTO_INGEST = FALSE` debido al uso de un stage interno.
+  - Ejecuta `ALTER PIPE PEDIDOS_PIPE REFRESH;` para procesar `pedidos_2.json`.
+  - Monitorea el estado mediante `SYSTEM$PIPE_STATUS`, confirma 5 pedidos únicos en `PEDIDOS_RAW` y 8 registros detallados en `PEDIDOS_DETALLE`.
 
-## Conclusion de calidad
-Los scripts cumplen rigurosamente con los requisitos: utilizan SQL basico, no incluyen procedimientos almacenados ni tareas complejas, y los nombres de objetos estan en mayusculas y en espanol.
+### 06_consultas.sql
+- Consultas analíticas:
+  - Consulta 1 calcula ventas netas físicas (`SUM(CANTIDAD * PRECIO_UNIT)`) agrupadas por `TIENDA` y ordenadas de mayor a menor. Opera exclusivamente sobre las 9 filas válidas de `VENTAS`.
+  - Consulta 2 determina el producto más solicitado online por ciudad mediante una CTE con `ROW_NUMBER() OVER (PARTITION BY CIUDAD ORDER BY SUM(CANTIDAD) DESC) WHERE POSICION = 1`.
+
+### 07_prueba_lector.sql
+- Validación de seguridad:
+  - Comienza cambiando a `USE ROLE CAFE_LECTOR`.
+  - Ejecuta consultas `SELECT` sobre `VENTAS` y `PEDIDOS_DETALLE` para confirmar lectura permitida.
+  - Ejecuta un `INSERT INTO VENTAS` intencional que debe fallar con error de permisos insuficientes, confirmando que el rol no permite mutaciones.
+  - Retorna a `USE ROLE SYSADMIN`.
+
+## Conclusión
+Todos los scripts cumplen con las restricciones de SQL básico, sin procedimientos ni tareas. Los comentarios en código son únicamente encabezados cortos de bloque de 6 palabras o menos. Los nombres de objetos están en mayúsculas y sin tildes.
